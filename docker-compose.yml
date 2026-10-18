@@ -1,0 +1,19 @@
+services:
+  textbook:
+    build: .
+    image: textbook:1.0.0
+    container_name: textbook
+    restart: unless-stopped
+    ports:
+      - "9621:9621"
+    environment:
+      PORT: "9621"
+      TEXTBOOK_DATA_DIR: /data
+      # 与「设置」页里的教材根目录等价；留空则在页面里选
+      TEXTBOOK_ROOT: /books
+      TZ: Asia/Shanghai
+    volumes:
+      # 数据库、会话、AI 密钥（AES-256-GCM）
+      - ./data:/data
+      # 教材目录必须可写：批注旁注文件 <pdf名>.marks.json 就写在 PDF 旁边
+      - ./book:/books

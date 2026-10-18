@@ -1,0 +1,20 @@
+# Never ship the textbook tree or the runtime database.
+book/
+data/
+.smoke-*/
+.shots-*/
+dist-packages/
+*.zip
+*.log
+
+node_modules/
+web/node_modules/
+web/src/
+web/public/
+web/scripts/
+web/dist-sh/
+
+.git/
+.gitignore
+CLAUDE.md
+img/

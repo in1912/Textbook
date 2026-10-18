@@ -1,0 +1,28 @@
+# textbook data (50 GB, not part of the source repository)
+book/
+
+# generated thumbnails (same-name .jpg next to each PDF)
+book/**/*.jpg
+book/**/*.png
+
+# runtime data (SQLite, uploads, logs)
+data/
+*.log
+
+# build output
+web/dist/
+web/node_modules/
+node_modules/
+# copied from pdfjs-dist at build time by web/scripts/copy-pdfjs-assets.mjs
+web/public/pdfjs/
+
+# local smoke-test scratch dirs and package artifacts
+.smoke-*/
+.shots-*/
+dist-packages/
+*.zip
+Logs-*.txt
+make-thumbs-failures.txt
+
+# local env
+.env
