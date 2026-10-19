@@ -5,6 +5,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import Icon from './Icon.vue';
 import BrushBar from './BrushBar.vue';
 import { API_BASE, api, fileUrl, token } from '../api.js';
+import { crumb, notePdfState, isIpadLike } from '../crashlog.js';
 import { debounce } from '../util.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -34,6 +35,16 @@ const TOOL_COLOR = {
   highlighter: '#fbbf24', line: '#111827', circle: '#dc2626',
 };
 
+// Tablets are the tight platform: every rendered page keeps two canvases
+// (content + annotations) at devicePixelRatio. At dpr 2 an A4 page costs about
+// 28 MB, so "keep 16 recent pages" can exceed what iOS grants a tab during a
+// fast fling. On iPad-like devices use a smaller DPR, fewer kept pages, and at
+// most two renders in flight so the peak stays bounded.
+const IPAD = isIpadLike();
+const MAX_DPR = IPAD ? 1.5 : 2;
+const MAX_CONCURRENT_RENDERS = IPAD ? 2 : 3;
+const KEEP_RENDERED = IPAD ? 8 : 16;
+
 const tool = ref('select');
 const color = ref('#e11d48');
 const width = ref(2.6);
@@ -56,6 +67,11 @@ const stageEl = ref(null);
 const pages = reactive([]); // { el, rendered, rendering, dpr }
 // RenderTasks stay outside reactive state for the same reason as `doc`.
 const renderTasks = new Map();
+// Bounded render queue: fast scrolling must not start a render task for every
+// page that flew past.
+const renderQueue = [];
+const queued = new Set();
+let activeRenders = 0;
 const dims = ref([]);       // page size at scale 1
 const marksDoc = reactive({ pages: {} });
 const marksLoaded = ref(false);
@@ -87,6 +103,8 @@ async function loadPdf() {
   loadError.value = '';
   progress.value = '';
   pages.splice(0, pages.length);
+  renderQueue.length = 0;
+  queued.clear();
   dims.value = [];
   marksDoc.pages = {};
   marksLoaded.value = false;
@@ -97,6 +115,7 @@ async function loadPdf() {
   zoom.value = 1;
   if (doc.value) { try { doc.value.destroy(); } catch { /* already gone */ } doc.value = null; }
   if (!props.path && !props.src) { loading.value = false; return; }
+  crumb('pdf_open_start', { path: props.path || 'share', ipad: IPAD });
 
   try {
     const task = pdfjsLib.getDocument({
@@ -139,6 +158,8 @@ async function loadPdf() {
     recomputeFit();
     loading.value = false;
     progress.value = '';
+    crumb('pdf_open', { path: props.path || 'share', pages: d.numPages });
+    reportState();
     emit('loaded', { pages: d.numPages });
     await nextTick();
     updateVisible(true);
@@ -163,7 +184,37 @@ function recomputeFit() {
 function ensureRender(i) {
   const st = pages[i];
   if (!st || st.rendered || st.rendering || !st.el || !doc.value) return;
-  renderPage(i, st);
+  if (queued.has(i)) return;
+  queued.add(i);
+  renderQueue.push(i);
+  pumpRenders();
+}
+
+// Pages queue up faster than they render during a fling. Skip anything that is
+// no longer near the viewport instead of rendering work nobody will see.
+function inRenderWindow(i) {
+  const el = scrollEl.value;
+  const st = pages[i];
+  if (!el || !st || !st.el) return false;
+  const top = el.scrollTop - el.clientHeight * 0.8;
+  const bottom = el.scrollTop + el.clientHeight * 1.8;
+  const y = st.el.offsetTop;
+  return y + st.el.offsetHeight >= top && y <= bottom;
+}
+
+function pumpRenders() {
+  while (activeRenders < MAX_CONCURRENT_RENDERS && renderQueue.length) {
+    const i = renderQueue.shift();
+    queued.delete(i);
+    const st = pages[i];
+    if (!st || st.rendered || st.rendering || !st.el || !doc.value) continue;
+    if (!inRenderWindow(i)) continue;
+    activeRenders++;
+    renderPage(i, st).finally(() => {
+      activeRenders--;
+      pumpRenders();
+    });
+  }
 }
 
 async function renderPage(i, st) {
@@ -172,7 +223,7 @@ async function renderPage(i, st) {
     const page = await doc.value.getPage(i + 1);
     const scale = fitScale.value * zoom.value;
     const vp = page.getViewport({ scale });
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     st.dpr = dpr;
     const canvas = st.el.querySelector('canvas.render');
     if (!canvas) { st.rendering = false; return; }
@@ -193,8 +244,13 @@ async function renderPage(i, st) {
     buildTextLayer(st.el, page, vp);
     setupAnnot(st, vp);
     redrawPage(i);
+    reportState();
   } catch (e) {
-    if (e && e.name !== 'RenderingCancelledException') loadError.value = String(e.message || e);
+    if (e && e.name !== 'RenderingCancelledException') {
+      loadError.value = String(e.message || e);
+      crumb('render_error', { page: i + 1, message: loadError.value.slice(0, 200) });
+      reportState();
+    }
   } finally {
     st.rendering = false;
   }
@@ -255,10 +311,39 @@ function releasePage(i) {
 function pruneRendered() {
   const rendered = [];
   for (let i = 0; i < pages.length; i++) if (pages[i].rendered) rendered.push(i);
-  if (rendered.length <= 16) return;
+  if (rendered.length <= KEEP_RENDERED) return;
   rendered.sort((a, b) => Math.abs(b - currentPage.value) - Math.abs(a - currentPage.value));
-  for (let k = 0; k < rendered.length - 14; k++) releasePage(rendered[k]);
+  for (let k = 0; k < rendered.length - (KEEP_RENDERED - 2); k++) releasePage(rendered[k]);
+  reportState();
 }
+
+// Cheap estimate of how many canvas pixels are alive. Reported with every
+// crash-log entry; on iPad this number is the first thing to look at.
+function statsNow() {
+  let rendered = 0;
+  let px = 0;
+  for (let i = 0; i < pages.length; i++) {
+    if (!pages[i].rendered || !pages[i].el) continue;
+    rendered++;
+    for (const sel of ['canvas.render', 'canvas.annot']) {
+      const c = pages[i].el.querySelector(sel);
+      if (c) px += c.width * c.height;
+    }
+  }
+  const st = pages[currentPage.value - 1];
+  return {
+    source: props.src ? 'share' : 'library',
+    path: props.path || '',
+    pages: numPages.value,
+    page: currentPage.value,
+    rendered,
+    canvas_mb: Math.round(px * 4 / 1048576),
+    zoom: Math.round(zoom.value * 100) / 100,
+    dpr: st ? Math.round(st.dpr * 100) / 100 : 0,
+    platform: IPAD ? 'ipad' : 'desktop',
+  };
+}
+const reportState = debounce(() => notePdfState(statsNow()), 1200);
 
 function updateVisible(force = false) {
   const el = scrollEl.value;
@@ -289,6 +374,7 @@ function updateVisible(force = false) {
       currentPage.value = cur;
       emit('page', cur);
       pruneRendered();
+      reportState();
     }
   }
   if (force) pruneRendered();

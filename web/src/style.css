@@ -133,6 +133,9 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; 
   font-size: 12.5px; color: var(--mut); letter-spacing: .4px;
 }
 .dirbody { flex: 1; overflow: auto; padding: 6px 6px 20px; }
+/* The tree keeps its width while the column animates to zero, so collapsing
+   clips it instead of reflowing every row on the way out. */
+.dircol-head, .dirbody { min-width: 258px; }
 
 .bookcol { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--bg); }
 .notecol {
@@ -161,7 +164,16 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; 
 .mob-btn.left { left: 0; right: auto; }
 .drawer-close { position: absolute; top: 6px; right: 6px; z-index: 30; background: var(--panel); }
 .mobile-only { display: none; }
+.desktop-only { display: inline-flex; }
 .drawer-mask { display: none; }
+
+/* Collapsed 目录 on wide screens: the column itself goes to zero width and a
+   slim "目录" tab stays on the left edge (the notes column works the same way). */
+@media (min-width: 1101px) {
+  .study.dir-collapsed .dircol {
+    width: 0; border-right-color: transparent; overflow: hidden;
+  }
+}
 
 /* ---- tree ---- */
 .tree-node { user-select: none; }
@@ -350,6 +362,7 @@ table.list tr:hover td { background: var(--bg2); }
   .study.notes-open .notecol { width: min(420px, 92vw); min-width: 0; transform: translateX(0); }
   .study.notes-open .notecol-inner { height: 100%; }
   .mobile-only { display: inline-flex; }
+  .desktop-only { display: none; }
   .edge-btn { display: none; }
   .study.dir-open .drawer-mask, .study.notes-open .drawer-mask {
     display: block; position: absolute; inset: 0; background: rgba(10,14,12,.35); z-index: 40;

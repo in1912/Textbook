@@ -67,11 +67,6 @@ function toggleTheme() {
       <button class="btn primary login-submit" type="submit" :disabled="busy || !username || !password">
         {{ busy ? '登录中…' : '登录' }}
       </button>
-
-      <div class="hint" style="margin-top:14px">
-        首次部署的初始管理员账号与密码写在服务器 <code>data/initial-admin.txt</code>，
-        登录后请到「用户管理」修改密码并删除该文件。
-      </div>
     </form>
   </div>
 </template>

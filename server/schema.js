@@ -64,7 +64,17 @@ CREATE TABLE IF NOT EXISTS tb_last (
   page INTEGER DEFAULT 1,
   updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS tb_crash_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT DEFAULT 'other',
+  at TEXT,
+  ua TEXT DEFAULT '',
+  summary TEXT DEFAULT '',
+  detail TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_tb_notes_pdf ON tb_notes(user_id, pdf);
+CREATE INDEX IF NOT EXISTS idx_tb_crash_user ON tb_crash_logs(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_tb_bookmarks_pdf ON tb_bookmarks(user_id, pdf);
 CREATE INDEX IF NOT EXISTS idx_tb_ai_reports_user ON tb_ai_reports(user_id, id DESC);
 `);

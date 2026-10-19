@@ -175,6 +175,45 @@ function createRouter(ctx) {
     res.json({ ok: true });
   });
 
+  // ---- crash log ----------------------------------------------------------
+  // The browser cannot report its own death, so web/src/crashlog.js leaves a
+  // heartbeat + breadcrumbs in localStorage and posts an "unclean_exit" on the
+  // next load. JavaScript errors and PDF render failures are posted at once.
+  // Everything here is per-user and bounded: 100 rows, 24 KB of detail each.
+  const CRASH_KINDS = new Set(['unclean_exit', 'js_error', 'render_error', 'memory', 'other']);
+  router.post('/crashlog', (req, res) => {
+    const u = uid(req);
+    const b = req.body || {};
+    const kind = CRASH_KINDS.has(String(b.kind || '')) ? String(b.kind) : 'other';
+    const summary = String(b.summary || '').slice(0, 500);
+    let detail = b.detail;
+    if (typeof detail !== 'string') {
+      try { detail = JSON.stringify(detail || {}); } catch { detail = ''; }
+    }
+    detail = String(detail || '').slice(0, 24000);
+    const ua = String(req.headers['user-agent'] || '').slice(0, 400);
+    db.prepare('INSERT INTO tb_crash_logs(user_id, kind, at, ua, summary, detail) VALUES(?,?,?,?,?,?)')
+      .run(u, kind, localNow(), ua, summary, detail);
+    // Keep the newest 100 per user; crash logs are diagnostic, not an archive.
+    db.prepare(`DELETE FROM tb_crash_logs WHERE user_id = ?
+      AND id NOT IN (SELECT id FROM tb_crash_logs WHERE user_id = ? ORDER BY id DESC LIMIT 100)`).run(u, u);
+    res.json({ ok: true });
+  });
+
+  router.get('/crashlog', (req, res) => {
+    const u = uid(req);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const rows = db.prepare(`SELECT id, kind, at, ua, summary, detail FROM tb_crash_logs
+      WHERE user_id = ? ORDER BY id DESC LIMIT ?`).all(u, limit);
+    res.json({ items: rows });
+  });
+
+  router.delete('/crashlog', (req, res) => {
+    const u = uid(req);
+    const r = db.prepare('DELETE FROM tb_crash_logs WHERE user_id = ?').run(u);
+    res.json({ ok: true, deleted: Number(r.changes) || 0 });
+  });
+
   // Directory picker for the root setting. Directories only, never file bytes.
   router.get('/browse', (req, res) => {
     const raw = String(req.query.path || '').trim();

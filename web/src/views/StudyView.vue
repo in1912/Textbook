@@ -22,6 +22,7 @@ const initialPage = ref(1);
 const bookmarks = ref([]);
 const notesVisible = ref(false);
 const dirOpen = ref(false);
+const dirCollapsed = ref(false);
 const refreshNonce = ref(0);
 const pdfRef = ref(null);
 const started = ref(false);
@@ -141,7 +142,7 @@ function gotoPageFromNote(n) {
 </script>
 
 <template>
-  <div class="study" :class="{ 'notes-open': bookPath && notesVisible, 'dir-open': dirOpen }">
+  <div class="study" :class="{ 'notes-open': bookPath && notesVisible, 'dir-open': dirOpen, 'dir-collapsed': dirCollapsed }">
     <div class="drawer-mask" @click="closeDrawers" />
 
     <DirTree
@@ -153,6 +154,7 @@ function gotoPageFromNote(n) {
       @select-dir="onSelectDir"
       @open-file="onOpenFile"
       @close="dirOpen = false"
+      @collapse="dirCollapsed = true"
     />
 
     <div class="bookcol">
@@ -189,18 +191,19 @@ function gotoPageFromNote(n) {
       <button v-if="bookPath && !notesVisible" class="edge-btn" title="展开笔记" @click="notesVisible = true">
         笔记
       </button>
+      <button v-if="dirCollapsed" class="edge-btn left" title="展开目录" @click="dirCollapsed = false">
+        目录
+      </button>
     </div>
 
     <div class="notecol">
-      <button class="icbtn drawer-close mobile-only" title="收起笔记" @click="notesVisible = false">
-        <Icon name="x" :size="16" />
-      </button>
       <NoteEditor
         :path="bookPath"
         :title="bookTitle"
         :page="state.book.page"
         :bookmarks="bookmarks"
         @goto-page="gotoPageFromNote"
+        @collapse="notesVisible = false"
       />
     </div>
 

@@ -33,6 +33,20 @@
 - 支持任意 OpenAI 兼容接口（`/chat/completions`）。接口地址、模型名、API Key 在【设置】里填，Key 用 AES-256-GCM 加密后存在本机，页面上只回显末四位
 - 每次调用记录 token 用量（只在服务商返回 usage 时记账，不估算）；【用户管理】里能看到每个用户的累计 token
 
+**用**
+
+- 目录和笔记两栏都能收起：目录收成左边缘的一条竖标签，点一下展开；笔记点栏头的按钮收起，右侧同样留一条标签。收起状态只影响当前窗口，不影响手机/平板的抽屉布局
+- 【设置】最下面有当前账号和【退出登录】，退出后回到登录页
+
+**排错**
+
+- 【设置 → 崩溃日志】记录浏览器端异常：脚本报错、PDF 渲染失败，以及「页面没正常结束就消失了」——iPad 上快速翻页导致标签页被系统回收时，下次进来会看到上一次最后所在的教材、页码、已渲染页数和显存估算。日志按用户隔离，最多留 100 条，可一键清空。JS 无法在进程被杀时执行代码，所以这类记录靠 5 秒心跳与上次会话留下的状态推断，不是系统级崩溃转储
+- iPad 上 PDF 的渲染策略自动收紧：像素比上限 1.5（桌面 2）、最多同时渲染 2 页（桌面 3）、只保留最近 8 页画布（桌面 16 页）。快速连续翻页时，视口外的排队页会被跳过，不会为了追进度把所有页面一起送进内存
+
+**升级**
+
+- 【设置 → 系统升级】直接上传升级包：预检（路径白名单、manifest 逐文件 sha256、服务端 JS 语法编译）→ 应用（临时文件 + 原子替换，覆盖前自动备份）→ 有服务端改动时自动重启接管；只换前端不用重启
+
 ![PDF 批注与笔记](img/PDF批注与笔记.png)
 
 ## 快速开始
@@ -43,13 +57,13 @@
 
 ### Windows
 
-1. 解压 `textbook-1.0.0-windows.zip`
+1. 解压 `textbook-1.2.0-windows.zip`
 2. 双击 `start-windows.cmd`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
 ### macOS
 
-1. 解压 `textbook-1.0.0-macos.zip`
+1. 解压 `textbook-1.2.0-macos.zip`
 2. 双击 `start-macos.command`。首次运行如被 Gatekeeper 拦下，右键 → 打开；或在终端执行 `chmod +x start-macos.command`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
@@ -81,14 +95,7 @@ npm start
 
 ### 首次登录
 
-第一次启动会创建管理员，用户名 `admin`，随机密码写在数据目录下的 `initial-admin.txt`：
-
-```
-<解压目录>/data/initial-admin.txt      # 分发包 / 源码运行
-/data/initial-admin.txt                # Docker
-```
-
-登录后到【用户管理】给自己重置一次密码（管理员重置不需要原密码），然后删掉这个文件。也可以用环境变量 `TEXTBOOK_ADMIN_PASS` 指定初始密码。
+第一次启动会创建管理员，用户名 `admin`，密码 `admin123`。页面不会显示这个提示，登录后请到【用户管理】给自己改一次密码（管理员重置不需要原密码）。也可以用环境变量 `TEXTBOOK_ADMIN_PASS` 指定初始密码；已有数据库不受影响，环境变量只在首次建库时生效。
 
 ![登录](img/登录.png)
 
@@ -122,11 +129,14 @@ book/
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `PORT` | `9621` | HTTP 端口 |
-| `TEXTBOOK_DATA_DIR` | `<程序目录>/data` | 数据库、会话、AI 密钥、初始密码文件 |
+| `TEXTBOOK_DATA_DIR` | `<程序目录>/data` | 数据库、会话、AI 密钥 |
 | `TEXTBOOK_ROOT` | `<程序目录>/book`（存在时） | 默认教材根目录；也可以在【设置】里改 |
 | `TEXTBOOK_SECRET` | 随机生成并写入 `data/secret.key` | 加密 AI Key 的主密钥，任意字符串（内部按 SHA-256 派生 32 字节） |
-| `TEXTBOOK_ADMIN_PASS` | 随机 | 仅首次建库时生效的管理员密码 |
+| `TEXTBOOK_ADMIN_PASS` | `admin123` | 仅首次建库时生效的管理员密码 |
 | `TEXTBOOK_WEB_DIST` | `<程序目录>/web/dist` | 前端构建产物位置（二次开发时用） |
+| `TEXTBOOK_UPGRADE_MAX_MB` | `64` | 升级包上传上限（MB） |
+| `TEXTBOOK_UPGRADE_KEEP_BACKUPS` | `5` | 保留的升级备份份数 |
+| `TEXTBOOK_NO_RESTART` | 空 | 设为 `1` 时升级只写文件、不重启（自检/调试用） |
 
 【设置】页里还能配置：学生姓名、当前年级、默认学年、基本情况（这三项会作为 AI 分析的背景）、默认展开的学段目录。
 
@@ -140,6 +150,31 @@ book/
 - 同一 IP 连续 8 次登录失败锁定 5 分钟。
 
 ![用户管理](img/用户管理.png)
+
+## 系统升级
+
+独立版带一个升级入口，不需要停服务、不需要手动覆盖文件：管理员登录后打开【设置 → 系统升级】。
+
+**生成升级包**（在开发机或打包机上）：
+
+```bash
+npm run build:web        # 前端有改动时
+# 修改 package.json 的 version
+npm run pack:upgrade     # 生成 textbook-upgrade-<版本>.zip
+```
+
+包里只有 `package.json`、`server/**.js`、`web/dist/**` 和一份 `manifest.json`（逐文件大小 + sha256）。`data/`、教材目录、`node_modules` 永远不会进包。
+
+**升级流程：**
+
+1. **预检**不写磁盘，只做校验：路径穿越、盘符绝对路径、反斜杠、Windows 非法字符一律拒绝；`data/`、`book/`、`node_modules/` 不许写；manifest 清单必须和包内文件逐条对上（数量、大小、sha256）；服务端 JS 用 `vm.Script` 编译（只编译，不执行）；前端必须带 `index.html`，且它引用的 assets 在包里或磁盘上存在——否则装上去就是白屏。
+2. **应用**分两阶段：先把所有文件写成 `<目标>.upgrade-tmp-<pid>`（失败则删临时文件，磁盘零改动），全部写成功后才逐个 rename 到位；被覆盖的文件先复制到 `data/upgrades/backup_<时间戳>/`。
+3. 包里改了 `server/**.js` 或 `package.json` 时，响应发出后进程自动重启：老进程先退出，新进程重试端口直到接管（Windows 没有 SO_REUSEPORT）。页面轮询 `/api/health`，看到新版本后自动刷新。
+4. 只换前端的包不需要重启，下一次请求就生效。
+
+**回滚**：设置页底部列出最近的备份，下载后按相同相对路径拷回安装目录并重启即可（默认保留 5 份；`RESTORE.txt` 里写了同样的说明）。
+
+**诚实边界**：升级不删除旧文件（旧 hash 的 assets 会留在 `web/dist` 里，不再被引用就无害）；不更新 `node_modules`，依赖有变化时预检会警告，需要管理员先在服务器上执行 `npm install --omit=dev` 再确认升级；rename 阶段是唯一的非全或无窗口（被杀毒/索引程序锁住时可能部分写入，此时不会重启，并给出备份目录）。
 
 ## AI 分析
 
@@ -181,9 +216,13 @@ node scripts/sync-workbench.mjs --check    # 只检查是否有漂移（CI/提�
 ## 开发
 
 ```bash
-npm run build:web      # 前端：Vite + Vue 3，产物在 web/dist
-npm start              # 后端：Express，静态托管 web/dist
-npm run pack:all       # 打三端包（需要先 build:web）
+npm run build:web       # 前端：Vite + Vue 3，产物在 web/dist
+npm start               # 后端：Express，静态托管 web/dist
+npm run pack:all        # 打三端包（需要先 build:web）
+npm run pack:upgrade    # 打升级包 textbook-upgrade-<版本>.zip
+npm run check:upgrade   # 升级自检（服务端 32 项，含真实重启接管）
+npm run check:upgrade:ui  # 升级界面自检（Playwright，上传→预检→应用全流程）
+npm run check:features  # 本次功能自检（默认密码、收起栏、崩溃日志、退出登录）
 ```
 
 目录结构：
@@ -197,10 +236,15 @@ server/
 ├── auth.js      scrypt 密码、会话、Cookie
 ├── ai.js        OpenAI 兼容客户端 + Key 加解密 + 用量记账
 ├── admin.js     独立端用户与 AI 配置管理
+├── upgrade.js   升级包预检 / 应用 / 备份 / 历史
+├── restart.js   升级后的自我接管（独立进程 + 端口重试）
+├── zip.js       零依赖 ZIP 读写（预检与备份下载共用）
 ├── db.js        node:sqlite 连接与数据目录
 └── schema.js    tb_* 表结构（幂等建表）
 web/              Vue 3 + Vite 前端
-scripts/          sync-workbench.mjs / build-packages.mjs / zip-utf8.py
+scripts/          sync-workbench.mjs / build-packages.mjs / build-upgrade-package.mjs /
+                  check-upgrade.mjs / check-upgrade-ui.mjs / check-features.mjs / zip-utf8.py
+web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载时补报）
 ```
 
 前端构建时会把 `pdfjs-dist` 的 169 个 cMap 和 16 个标准字体拷到 `web/public/pdfjs/`，再由 Vite 原样带进 `dist/`。**中文教材没有这些文件会渲染成空白字形**，所以打补丁/换构建流程时不要漏掉这一步。
@@ -209,9 +253,11 @@ scripts/          sync-workbench.mjs / build-packages.mjs / zip-utf8.py
 
 | 位置 | 内容 |
 |---|---|
-| `data/textbook.sqlite` | 用户、设置、笔记、书签、分享、AI 报告与用量 |
+| `data/textbook.sqlite` | 用户、设置、笔记、书签、分享、AI 报告与用量、崩溃日志（`tb_crash_logs`，每人最多 100 条） |
 | `data/secret.key` | 加密 AI Key 的主密钥（首次启动生成；丢了需要重新填 Key） |
-| `data/initial-admin.txt` | 首次启动的管理员初始密码（登录后应删除） |
+| `data/upgrades/backup_<14位时间戳>/` | 每次升级覆盖前的文件备份（默认保留 5 份，含 `RESTORE.txt`） |
+| `data/upgrades/history.jsonl` | 升级历史（每次预检/应用的版本、文件数、结果） |
+| `data/upgrades/state.json` | 重启交接状态（`restart_pending`，正常启动后自动清除） |
 | 教材目录旁的 `*.marks.json` | 该教材的笔画批注 |
 
 备份 = 拷走 `data/` 目录（`textbook.sqlite` 使用 WAL 模式，复制前先停服务或执行 `sqlite3 textbook.sqlite '.backup backup.sqlite'`）。教材本身不需要备份到本系统——它始终是磁盘上的一组普通文件。

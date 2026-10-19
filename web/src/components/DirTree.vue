@@ -13,7 +13,7 @@ const props = defineProps({
   selected: { type: String, default: '' },
   refreshNonce: { type: Number, default: 0 },
 });
-const emit = defineEmits(['select-dir', 'open-file', 'loaded', 'error', 'close']);
+const emit = defineEmits(['select-dir', 'open-file', 'loaded', 'error', 'close', 'collapse']);
 
 const nodes = reactive({});
 const loading = reactive({});
@@ -117,6 +117,9 @@ defineExpose({ refresh, boot });
       <span>目录</span>
       <span class="grow" />
       <button class="icbtn" title="刷新目录" @click="refresh"><Icon name="refresh" :size="15" /></button>
+      <button class="icbtn desktop-only" title="收起目录" @click="$emit('collapse')">
+        <Icon name="panel-left" :size="15" />
+      </button>
       <button class="icbtn mobile-only" title="收起目录" @click="$emit('close')"><Icon name="x" :size="15" /></button>
     </div>
     <div class="dirbody">

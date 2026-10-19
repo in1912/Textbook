@@ -3,9 +3,7 @@
 // Here we mirror the workbench contract — Bearer, ?token= and a cookie — so the
 // same frontend works in both places.
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { db, DATA_DIR } = require('./db');
+const { db } = require('./db');
 
 const SESSION_DAYS = 30;
 const COOKIE = 'wb_token';
@@ -84,17 +82,13 @@ function ensureAdmin() {
   if (n > 0) return null;
   const username = String(process.env.TEXTBOOK_ADMIN_USER || 'admin').trim() || 'admin';
   const envPass = process.env.TEXTBOOK_ADMIN_PASS;
-  const password = envPass || crypto.randomBytes(9).toString('base64url');
+  // A brand-new deployment gets a predictable first login. The login screen no
+  // longer mentions it; the server log says it once and the admin should change
+  // it in 用户管理 straight away.
+  const password = envPass || 'admin123';
   db.prepare('INSERT INTO users(username, password_hash, role, display_name) VALUES(?,?,?,?)')
     .run(username, hashPassword(password), 'admin', '管理员');
-  if (!envPass) {
-    const file = path.join(DATA_DIR, 'initial-admin.txt');
-    fs.writeFileSync(file,
-      `初始管理员账号：${username}\n初始密码：${password}\n\n登录后请到「用户管理」修改密码，然后删除这个文件。\n`,
-      'utf8');
-    return { username, password, file };
-  }
-  return { username, password: null, file: null };
+  return { username, password, from_env: !!envPass };
 }
 
 function setCookie(res, token) {

@@ -1,6 +1,6 @@
 {
   "name": "textbook",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Self-hosted full-subject textbook reader with PDF annotation, rich notes and AI study analysis",
   "license": "MIT",
@@ -13,7 +13,11 @@
     "dev": "node --experimental-sqlite server/index.js",
     "build:web": "npm --prefix web install && npm --prefix web run build",
     "sync:workbench": "node scripts/sync-workbench.mjs",
-    "pack:all": "node scripts/build-packages.mjs"
+    "pack:all": "node scripts/build-packages.mjs",
+    "pack:upgrade": "node scripts/build-upgrade-package.mjs",
+    "check:upgrade": "node scripts/check-upgrade.mjs",
+    "check:upgrade:ui": "node scripts/check-upgrade-ui.mjs",
+    "check:features": "node scripts/check-features.mjs"
   },
   "dependencies": {
     "express": "^4.21.2"

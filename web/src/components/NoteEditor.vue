@@ -11,7 +11,7 @@ const props = defineProps({
   page: { type: Number, default: 1 },
   bookmarks: { type: Array, default: () => [] },
 });
-const emit = defineEmits(['goto-page', 'saved', 'share-changed']);
+const emit = defineEmits(['goto-page', 'saved', 'share-changed', 'collapse']);
 
 const editorEl = ref(null);
 const loading = ref(false);
@@ -339,6 +339,9 @@ onBeforeUnmount(() => {
       </button>
       <button class="icbtn" title="分享笔记" :disabled="!path" @click="openShare">
         <Icon name="share" :size="16" />
+      </button>
+      <button class="icbtn" title="收起笔记" @click="$emit('collapse')">
+        <Icon name="panel-right" :size="16" />
       </button>
     </div>
 
