@@ -167,9 +167,23 @@ async function main() {
     const cleared = (await r.json()).deleted;
     check('a user can clear their own reports', r.ok && cleared === 1, String(cleared));
 
+    // ---- build output ----
+    const distHtml = fs.readFileSync(path.join(ROOT, 'web', 'dist', 'index.html'), 'utf8');
+    check('index.html ships the Promise.withResolvers polyfill',
+      distHtml.includes('Promise.withResolvers'));
+    const assetsDir = path.join(ROOT, 'web', 'dist', 'assets');
+    const workerName = fs.readdirSync(assetsDir).find((f) => /^pdf\.worker.*\.mjs$/.test(f));
+    check('the worker asset exists', !!workerName);
+    const workerSrc = workerName ? fs.readFileSync(path.join(assetsDir, workerName), 'utf8') : '';
+    check('the worker asset starts with the same polyfill',
+      workerSrc.startsWith('/*tb-withresolvers*/'), workerSrc.slice(0, 40));
+
     // ---- browser ----
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    // Simulate Safari < 17.4 / older Android WebViews: no native
+    // Promise.withResolvers. index.html must put it back before pdf.js runs.
+    await context.addInitScript(() => { Promise.withResolvers = undefined; });
     const page = await context.newPage();
     page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
     page.on('dialog', (d) => d.accept().catch(() => {}));
@@ -215,6 +229,15 @@ async function main() {
     await page.locator('.tree-row[title="一年级上册.pdf"]').waitFor({ timeout: 10000 });
     await page.locator('.tree-row[title="一年级上册.pdf"]').click();
     await page.locator('.study.notes-open').waitFor({ timeout: 15000 });
+    const firstCanvas = page.locator('.pdf-page canvas.render').first();
+    await firstCanvas.waitFor({ timeout: 15000 });
+    let pdfWiped = 0;
+    for (let i = 0; i < 60; i++) {
+      pdfWiped = await firstCanvas.evaluate((el) => el.width * el.height);
+      if (pdfWiped > 0) break;
+      await sleep(250);
+    }
+    check('PDF renders with Promise.withResolvers removed', pdfWiped > 0, String(pdfWiped));
     await sleep(600);
     const noteWidth = () => page.locator('.notecol').evaluate((el) => el.getBoundingClientRect().width);
     const n0 = await noteWidth();

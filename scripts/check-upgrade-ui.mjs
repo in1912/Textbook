@@ -141,7 +141,8 @@ async function main() {
     const hint = await page.locator('.card', { hasText: '系统升级' }).innerText();
     check('running version is shown', hint.includes('1.0.0-ui'), hint.slice(0, 120));
 
-    await page.locator('input[type="file"]').setInputFiles(pack);
+    // 设置页现在还有 SSL 面板的两个文件输入框，必须限定在「系统升级」卡里。
+    await page.locator('.card', { hasText: '系统升级' }).locator('input[type="file"]').setInputFiles(pack);
     await page.locator('button', { hasText: '预检' }).click();
     await page.locator('text=应用升级').waitFor({ timeout: 20000 });
     const planText = await page.locator('.up-plan').innerText();

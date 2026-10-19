@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#f7f7f5" />
     <title>全科教材</title>
+    <script>
+      // pdf.js 4.x calls Promise.withResolvers(), which Safari only shipped in
+      // 17.4. Older iPads / Android WebViews otherwise fail as soon as a PDF is
+      // opened ("Promise.withResolvers is not a function"). This runs before
+      // the app module and before pdf.js is evaluated.
+      (function () {
+        if (typeof Promise.withResolvers === 'function') return;
+        Promise.withResolvers = function () {
+          var resolve, reject;
+          var promise = new Promise(function (res, rej) { resolve = res; reject = rej; });
+          return { promise: promise, resolve: resolve, reject: reject };
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

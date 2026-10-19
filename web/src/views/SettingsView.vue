@@ -1,6 +1,7 @@
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Icon from '../components/Icon.vue';
+import SslPanel from '../components/SslPanel.vue';
 import { BASE_PREFIX, api, token } from '../api.js';
 import { flushPendingCrash } from '../crashlog.js';
 
@@ -575,6 +576,8 @@ async function logout() {
           </div>
         </div>
       </div>
+
+      <SslPanel v-if="!caps.embedded && caps.admin" />
 
       <div v-if="!caps.embedded" class="card">
         <h3>崩溃日志 <span v-if="crashes.length" class="chip">{{ crashes.length }}</span></h3>

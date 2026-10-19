@@ -63,7 +63,7 @@ function writeFatal(err) {
 }
 
 // Call only after the HTTP response has finished (res 'finish').
-function scheduleRestart({ fromVersion = '', toVersion = '', backupDir = '' } = {}) {
+function scheduleRestart({ fromVersion = '', toVersion = '', backupDir = '', reason = '升级' } = {}) {
   if (NO_RESTART) {
     return {
       restart: 'suppressed', child_pid: 0,
@@ -73,12 +73,17 @@ function scheduleRestart({ fromVersion = '', toVersion = '', backupDir = '' } = 
   if (scheduled) return { restart: 'scheduled', child_pid: 0, note: '已经发起过一次重启，本次不重复' };
   scheduled = true;
 
-  writeState({ restart_pending: true, from_version: fromVersion, to_version: toVersion, backup_dir: backupDir, at: new Date().toISOString() });
+  writeState({
+    restart_pending: true, reason,
+    from_version: fromVersion, to_version: toVersion,
+    backup_dir: backupDir, at: new Date().toISOString(),
+  });
 
   const logPath = LOG_FILE();
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const fd = fs.openSync(logPath, 'a');
-  fs.writeSync(fd, `\n===== ${new Date().toISOString()} pid ${process.pid} 发起重启交接（v${fromVersion} → v${toVersion}）=====\n`);
+  const label = fromVersion || toVersion ? `${reason}（v${fromVersion || '?'} → v${toVersion || '?'}）` : reason;
+  fs.writeSync(fd, `\n===== ${new Date().toISOString()} pid ${process.pid} 发起重启交接：${label} =====\n`);
 
   let child;
   try {

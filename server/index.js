@@ -7,6 +7,9 @@
 // (no native modules, no build step).
 const express = require('express');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const net = require('net');
 const path = require('path');
 
 const { db, DATA_DIR } = require('./db');
@@ -16,6 +19,7 @@ const adminRouter = require('./admin');
 const { ensureSchema } = require('./schema');
 const { createRouter } = require('./router');
 const { createUpgradeRouter } = require('./upgrade');
+const { createSslRouter } = require('./sslRoutes');
 const restart = require('./restart');
 
 ensureSchema(db);
@@ -136,6 +140,8 @@ app.use('/api/textbook', textbookRouter);
 // Standalone-only: the workbench owns its own upgrade mechanism, so the
 // embedded copy never mounts this router.
 app.use('/api/admin/upgrade', createUpgradeRouter({ root: ROOT, webDist: WEB_DIST, restart }));
+// HTTPS 证书（自签名）管理：独立端设置页用，工作台有自己的 SSL 面板。
+app.use('/api/admin/ssl', createSslRouter());
 app.use('/api/admin', adminRouter);
 
 // ---- static SPA ------------------------------------------------------------
@@ -187,8 +193,53 @@ const IS_CHILD = restart.isChild();
 const RETRY_LEFT = IS_CHILD ? 24 : 2;
 const RETRY_EVERY = IS_CHILD ? 500 : 1000;
 
-function boot() {
+// HTTPS 证书（设置 → HTTPS 证书 生成/上传后放这里）。两个文件都在才启用 HTTPS。
+const SSL_CERT = path.join(DATA_DIR, 'ssl', 'cert.pem');
+const SSL_KEY = path.join(DATA_DIR, 'ssl', 'key.pem');
+
+function listenLocal(srv) {
+  return new Promise((resolve, reject) => {
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => resolve(srv.address().port));
+  });
+}
+
+// 同一个端口同时接 HTTP 和 HTTPS：外层 net 服务器读第一个字节，
+// 0x16（TLS handshake）走内层 https，其余走内层 http，两个内层都只听 127.0.0.1。
+// 第一段数据必须在 net.connect 后立刻 write（连接建立前会自动排队），
+// 否则 request body 前面几 KB（上传、大 POST）可能乱序。
+async function createDualServer(certPem, keyPem) {
+  const httpsInner = https.createServer({ cert: certPem, key: keyPem }, app);
+  const httpInner = http.createServer(app);
+  const [tcpPort, tlsPort] = await Promise.all([listenLocal(httpInner), listenLocal(httpsInner)]);
+  const outer = net.createServer((socket) => {
+    socket.on('error', () => socket.destroy());
+    socket.once('data', (buf) => {
+      const target = net.connect(buf[0] === 0x16 ? tlsPort : tcpPort, '127.0.0.1');
+      target.on('error', () => socket.destroy());
+      socket.on('error', () => target.destroy());
+      target.write(buf); // 首段立即入队，保证字节顺序
+      socket.pipe(target);
+      target.pipe(socket);
+    });
+  });
+  return { server: outer, inner: [httpInner, httpsInner], tls: true };
+}
+
+async function boot() {
   let left = RETRY_LEFT;
+  let info = null;
+
+  // 证书坏了不能让服务起不来：读失败就退回纯 HTTP，并在日志里说明。
+  if (fs.existsSync(SSL_CERT) && fs.existsSync(SSL_KEY)) {
+    try {
+      info = await createDualServer(fs.readFileSync(SSL_CERT), fs.readFileSync(SSL_KEY));
+    } catch (e) {
+      console.warn('[textbook] data/ssl 下的证书无法加载，本次以纯 HTTP 启动：', e.message);
+    }
+  }
+  const server = info ? info.server : http.createServer(app);
+
   const onError = (err) => {
     if (err.code === 'EADDRINUSE' && --left > 0) {
       console.log(`[textbook] 端口 ${PORT} 被占用（多半是上一个进程还没退干净），${RETRY_EVERY}ms 后重试，还剩 ${left} 次`);
@@ -198,19 +249,29 @@ function boot() {
     restart.writeFatal(err);
     process.exit(3);
   };
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  server.on('error', onError);
+  server.listen(PORT, '0.0.0.0', () => {
     server.off('error', onError);
     const pending = restart.readPending();
     // A handoff that never completed leaves restart_pending=true behind. The
     // process that is now starting was not spawned by that handoff, so say it
     // out loud rather than letting the upgrade look successful.
     if (pending && pending.restart_pending && !IS_CHILD) {
-      console.warn(`[textbook] 上次升级（v${pending.from_version} → v${pending.to_version}）的重启没有完成交接；`
+      const what = pending.reason || '升级';
+      const ver = pending.from_version || pending.to_version
+        ? `（v${pending.from_version || '?'} → v${pending.to_version || '?'}）` : '';
+      console.warn(`[textbook] 上次${what}${ver}的重启没有完成交接；`
         + `如果行为异常，把 ${pending.backup_dir || 'data/upgrades/backup_*'} 里的文件拷回安装目录再启动`);
     }
     restart.clearPending();
 
-    console.log(`[textbook] listening on http://0.0.0.0:${PORT}`);
+    if (info && info.tls) {
+      console.log(`[textbook] listening on :${PORT}（HTTP/HTTPS 同端口自适应，证书 ${SSL_CERT}）`);
+      console.log(`[textbook]   http://0.0.0.0:${PORT}   https://0.0.0.0:${PORT}`);
+    } else {
+      console.log(`[textbook] listening on http://0.0.0.0:${PORT}`);
+      if (fs.existsSync(SSL_CERT)) console.log('[textbook] 提示：data/ssl 的证书没能启用，当前只有 HTTP');
+    }
     console.log(`[textbook] data: ${DATA_DIR}`);
     console.log(`[textbook] web:  ${WEB_DIST}`);
     if (defaultRoot) console.log(`[textbook] default root: ${defaultRoot}`);
@@ -220,7 +281,6 @@ function boot() {
       else console.log(`[textbook] 已创建初始管理员 ${bootInfo.username}，默认密码 admin123，请登录后到「用户管理」修改`);
     }
   });
-  server.on('error', onError);
 }
 
 boot();

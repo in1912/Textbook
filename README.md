@@ -38,6 +38,13 @@
 - 目录和笔记两栏都能收起：目录收成左边缘的一条竖标签，点一下展开；笔记点栏头的按钮收起，右侧同样留一条标签。收起状态只影响当前窗口，不影响手机/平板的抽屉布局
 - 【设置】最下面有当前账号和【退出登录】，退出后回到登录页
 
+**HTTPS**
+
+- 【设置 → HTTPS 证书】自助签发自签名证书：填通用名称（CN）和要覆盖的域名/IP，一键生成，不需要 openssl 命令行；也能上传别处生成的 cert + key，服务端校验两者配对后才替换，旧证书自动备份到 `data/ssl/backup-<时间戳>/`
+- 证书存 `<数据目录>/ssl/cert.pem|key.pem`（Docker 即 `/data/ssl`），重启服务后生效。启用后**同一个端口同时接受 http:// 和 https://**（首字节探测），老书签不用改
+- 面板显示当前签名、剩余天数（到期前 30 天起显示提醒）、SAN 覆盖列表、证书与私钥是否匹配、文件位置与修改时间；cert.pem / key.pem 可单独下载，用来给手机/电脑做信任导入
+- 自签名证书不在系统信任链里，每台设备要手动信任一次；换新证书后，已信任旧证书的设备需要重新导入
+
 **排错**
 
 - 【设置 → 崩溃日志】记录浏览器端异常：脚本报错、PDF 渲染失败，以及「页面没正常结束就消失了」——iPad 上快速翻页导致标签页被系统回收时，下次进来会看到上一次最后所在的教材、页码、已渲染页数和显存估算。日志按用户隔离，最多留 100 条，可一键清空。JS 无法在进程被杀时执行代码，所以这类记录靠 5 秒心跳与上次会话留下的状态推断，不是系统级崩溃转储
@@ -57,13 +64,13 @@
 
 ### Windows
 
-1. 解压 `textbook-1.2.0-windows.zip`
+1. 解压 `textbook-1.3.0-windows.zip`
 2. 双击 `start-windows.cmd`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
 ### macOS
 
-1. 解压 `textbook-1.2.0-macos.zip`
+1. 解压 `textbook-1.3.0-macos.zip`
 2. 双击 `start-macos.command`。首次运行如被 Gatekeeper 拦下，右键 → 打开；或在终端执行 `chmod +x start-macos.command`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
@@ -136,7 +143,7 @@ book/
 | `TEXTBOOK_WEB_DIST` | `<程序目录>/web/dist` | 前端构建产物位置（二次开发时用） |
 | `TEXTBOOK_UPGRADE_MAX_MB` | `64` | 升级包上传上限（MB） |
 | `TEXTBOOK_UPGRADE_KEEP_BACKUPS` | `5` | 保留的升级备份份数 |
-| `TEXTBOOK_NO_RESTART` | 空 | 设为 `1` 时升级只写文件、不重启（自检/调试用） |
+| `TEXTBOOK_NO_RESTART` | 空 | 设为 `1` 时升级/证书面板只写文件、不重启（自检/调试用；此时设置页会明确提示「需手动重启」） |
 
 【设置】页里还能配置：学生姓名、当前年级、默认学年、基本情况（这三项会作为 AI 分析的背景）、默认展开的学段目录。
 
@@ -222,7 +229,8 @@ npm run pack:all        # 打三端包（需要先 build:web）
 npm run pack:upgrade    # 打升级包 textbook-upgrade-<版本>.zip
 npm run check:upgrade   # 升级自检（服务端 32 项，含真实重启接管）
 npm run check:upgrade:ui  # 升级界面自检（Playwright，上传→预检→应用全流程）
-npm run check:features  # 本次功能自检（默认密码、收起栏、崩溃日志、退出登录）
+npm run check:features  # 功能自检（默认密码、收起栏、崩溃日志、退出登录）
+npm run check:ssl       # HTTPS 证书自检（47 项：权限、生成、下载、上传校验、同端口双协议、真实重启、UI）
 ```
 
 目录结构：
@@ -237,13 +245,16 @@ server/
 ├── ai.js        OpenAI 兼容客户端 + Key 加解密 + 用量记账
 ├── admin.js     独立端用户与 AI 配置管理
 ├── upgrade.js   升级包预检 / 应用 / 备份 / 历史
-├── restart.js   升级后的自我接管（独立进程 + 端口重试）
+├── restart.js   升级/证书后的自我接管（独立进程 + 端口重试）
+├── ssl.js       零依赖自签名证书：ASN.1 DER 编码、RSA 2048 + SHA-256、SAN
+├── sslRoutes.js 证书状态 / 生成 / 下载 / 上传校验 / 重启（管理员专用）
 ├── zip.js       零依赖 ZIP 读写（预检与备份下载共用）
 ├── db.js        node:sqlite 连接与数据目录
 └── schema.js    tb_* 表结构（幂等建表）
 web/              Vue 3 + Vite 前端
 scripts/          sync-workbench.mjs / build-packages.mjs / build-upgrade-package.mjs /
-                  check-upgrade.mjs / check-upgrade-ui.mjs / check-features.mjs / zip-utf8.py
+                  check-upgrade.mjs / check-upgrade-ui.mjs / check-features.mjs /
+                  check-ssl.mjs / zip-utf8.py
 web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载时补报）
 ```
 
@@ -258,6 +269,8 @@ web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载
 | `data/upgrades/backup_<14位时间戳>/` | 每次升级覆盖前的文件备份（默认保留 5 份，含 `RESTORE.txt`） |
 | `data/upgrades/history.jsonl` | 升级历史（每次预检/应用的版本、文件数、结果） |
 | `data/upgrades/state.json` | 重启交接状态（`restart_pending`，正常启动后自动清除） |
+| `data/ssl/cert.pem`、`data/ssl/key.pem` | 自签名证书与私钥（两者同时存在才会以 HTTP/HTTPS 自适应模式启动） |
+| `data/ssl/backup-<时间戳>/` | 每次生成/上传替换前的旧证书备份 |
 | 教材目录旁的 `*.marks.json` | 该教材的笔画批注 |
 
 备份 = 拷走 `data/` 目录（`textbook.sqlite` 使用 WAL 模式，复制前先停服务或执行 `sqlite3 textbook.sqlite '.backup backup.sqlite'`）。教材本身不需要备份到本系统——它始终是磁盘上的一组普通文件。
@@ -270,6 +283,9 @@ web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载
 **Node 版本报错 `node:sqlite` 不存在**
 需要 Node ≥ 22.5。启动脚本已经带 `--experimental-sqlite`（Node 24 上也兼容），如果自己写systemd/服务命令，请保留这个参数。
 
+**手机上打开 PDF 报 `Promise.withResolvers is not a function`**
+旧版 Safari（< 17.4）和部分安卓 WebView 没有这个 API，而 pdf.js 4.x 在主线程和 worker 里都会调用它。v1.2.1 起页面入口和 PDF worker 文件都带了 polyfill，不需要升级手机系统；旧版包升级后即可。
+
 **中文显示成方块或空白**
 `web/dist/pdfjs/` 不完整。重新执行 `npm run build:web`——它会重新拷贝 cMaps 和标准字体。
 
@@ -279,8 +295,17 @@ web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载
 **端口被占用**
 `PORT=9700 npm start`，或在启动脚本里设置环境变量。
 
+**启用了 HTTPS，原来的 http 地址还能用吗**
+能。启用证书后服务会同时接受两种协议：同一个端口，首字节是 TLS 握手就走 HTTPS，否则走 HTTP。老书签、旧二维码都不受影响。
+
+**浏览器提示「不安全 / 证书无效」**
+自签名证书是服务器自己签的，不在系统的受信任根里，这是预期行为。把面板里下载的 `cert.pem` 装进设备的「受信任的根证书颁发机构」即可（iOS 装完还要在 设置 → 通用 → 关于本机 → 证书信任设置 里打开完全信任）。换过证书后所有设备要重新导入一次。
+
+**证书生成了，为什么 https 还是旧证书 / 打不开**
+证书在进程启动时加载，生成或上传后要点【重启服务（应用证书）】。如果启动时带了 `TEXTBOOK_NO_RESTART=1`，面板会提示「未重启」，需要手动重启进程。
+
 **能放到公网吗**
-设计目标是家庭局域网或 VPN 内使用。要暴露到公网，请放在 HTTPS 反向代理后面，并限制来源 IP；分享链接本身可以匿名访问，属于预期行为。
+设计目标是家庭局域网或 VPN 内使用。要暴露到公网，正规做法是放在 HTTPS 反向代理后面（Let's Encrypt 等 CA 证书）并限制来源 IP；内置的自签名证书适合内网直连和内网穿透（穿透必须是 TCP 型，HTTP 型会拦掉 TLS 握手）。分享链接本身可以匿名访问，属于预期行为。
 
 ## 许可与致谢
 
