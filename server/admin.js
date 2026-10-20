@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('./db');
 const auth = require('./auth');
 const ai = require('./ai');
+const loginlog = require('./loginlog');
 
 const router = express.Router();
 router.use(auth.requireUser, auth.requireAdmin);
@@ -120,6 +121,34 @@ router.delete('/users/:id', (req, res) => {
   // not meant to destroy a student's notes. An admin can still see the usage
   // rows by id if they need to audit them.
   res.json({ ok: true });
+});
+
+// ---- login log + IP blacklist ----------------------------------------------
+// The attempted password is returned decrypted here; only an administrator can
+// reach this router, and the value is encrypted at rest (server/secret.js).
+router.get('/login-logs', (req, res) => {
+  try {
+    res.json(loginlog.list({ page: req.query.page, page_size: req.query.page_size }));
+  } catch (e) {
+    res.status(500).json({ error: 'log_failed', message: '读取登录日志失败' });
+  }
+});
+
+router.get('/ip-blacklist', (req, res) => {
+  res.json({ items: loginlog.listBlacklist() });
+});
+
+router.post('/ip-blacklist', (req, res) => {
+  const b = req.body || {};
+  const r = loginlog.addBlacklist(b.ip, b.note, req.user.username);
+  if (r.error) return res.status(400).json({ error: r.error, message: r.message });
+  res.json(r);
+});
+
+router.delete('/ip-blacklist/:ip', (req, res) => {
+  const r = loginlog.removeBlacklist(req.params.ip);
+  if (r.error) return res.status(400).json({ error: r.error, message: r.message });
+  res.json(r);
 });
 
 module.exports = router;

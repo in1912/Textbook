@@ -73,10 +73,30 @@ CREATE TABLE IF NOT EXISTS tb_crash_logs (
   summary TEXT DEFAULT '',
   detail TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS tb_login_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  username TEXT DEFAULT '',
+  display_name TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'fail',
+  ip TEXT DEFAULT '',
+  region TEXT DEFAULT '',
+  password_enc TEXT DEFAULT '',
+  client TEXT DEFAULT '',
+  ua TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS tb_ip_blacklist (
+  ip TEXT PRIMARY KEY,
+  note TEXT DEFAULT '',
+  created_at TEXT,
+  created_by TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_tb_notes_pdf ON tb_notes(user_id, pdf);
 CREATE INDEX IF NOT EXISTS idx_tb_crash_user ON tb_crash_logs(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_tb_bookmarks_pdf ON tb_bookmarks(user_id, pdf);
 CREATE INDEX IF NOT EXISTS idx_tb_ai_reports_user ON tb_ai_reports(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tb_login_logs_at ON tb_login_logs(id DESC);
+CREATE INDEX IF NOT EXISTS idx_tb_login_logs_ip ON tb_login_logs(ip, id DESC);
 `);
   // older databases get the columns added in place (no destructive migrations)
   const cols = (t) => {

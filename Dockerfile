@@ -20,6 +20,12 @@ COPY server ./server
 COPY web/dist ./web/dist
 COPY README.md LICENSE ./
 
+# 在线升级（设置 → 系统升级）会先在 /app 下写 .upgrade-tmp-* 再 rename。
+# 镜像里的 /app 默认归 root，而 compose 常用非 root 用户运行（如
+# user: "1000:1001"），不 chown 就会 EACCES。node 固定 uid=1000，属主
+# 有写权限即可，gid 不同不影响。
+RUN chown -R node:node /app
+
 VOLUME ["/data"]
 EXPOSE 9621
 

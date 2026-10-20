@@ -44,6 +44,7 @@ const P = {
   copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
   plus: 'M12 5v14M5 12h14',
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
+  lock: 'M6 11h12v10H6zM8 11V8a4 4 0 0 1 8 0v3',
   'panel-left': 'M3 4h18v16H3zM9 4v16',
   'panel-right': 'M3 4h18v16H3zM15 4v16',
   text: 'M5 4h14M12 4v16M9 20h6',

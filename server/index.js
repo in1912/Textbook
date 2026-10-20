@@ -15,6 +15,7 @@ const path = require('path');
 const { db, DATA_DIR } = require('./db');
 const auth = require('./auth');
 const ai = require('./ai');
+const loginlog = require('./loginlog');
 const adminRouter = require('./admin');
 const { ensureSchema } = require('./schema');
 const { createRouter } = require('./router');
@@ -23,6 +24,7 @@ const { createSslRouter } = require('./sslRoutes');
 const restart = require('./restart');
 
 ensureSchema(db);
+loginlog.migrateLegacyTimes();
 auth.cleanupSessions();
 const bootInfo = auth.ensureAdmin();
 
@@ -63,18 +65,30 @@ function noteLoginFailure(ip) {
 }
 
 app.post('/api/auth/login', (req, res) => {
-  const ip = req.ip || 'unknown';
-  if (loginBlocked(ip)) {
-    return res.status(429).json({ error: 'too_many', message: '尝试次数过多，请 5 分钟后再试' });
-  }
+  const ip = loginlog.normalizeIp(req.ip || (req.socket && req.socket.remoteAddress));
   const username = String((req.body && req.body.username) || '').trim();
   const password = String((req.body && req.body.password) || '');
+  const ua = String(req.headers['user-agent'] || '');
   const row = db.prepare('SELECT * FROM users WHERE username=?').get(username);
+  const displayName = row ? (row.display_name || row.nickname || '') : '';
+  // Best-effort audit: never let a logging failure change the login response.
+  const audit = (status) => loginlog.record({ username, display_name: displayName, status, ip, password, ua });
+
+  if (loginlog.isBlocked(ip)) {
+    audit('blocked');
+    return res.status(403).json({ error: 'ip_blocked', message: '该 IP 已被禁止登录' });
+  }
+  if (loginBlocked(ip)) {
+    audit('blocked');
+    return res.status(429).json({ error: 'too_many', message: '尝试次数过多，请 5 分钟后再试' });
+  }
   if (!row || row.disabled || !auth.verifyPassword(password, row.password_hash)) {
     noteLoginFailure(ip);
+    audit('fail');
     return res.status(401).json({ error: 'bad_credentials', message: '账号或密码不正确' });
   }
   loginHits.delete(ip);
+  audit('ok');
   const token = auth.createSession(row.id);
   auth.setCookie(res, token);
   res.json({

@@ -38,6 +38,17 @@
 - 目录和笔记两栏都能收起：目录收成左边缘的一条竖标签，点一下展开；笔记点栏头的按钮收起，右侧同样留一条标签。收起状态只影响当前窗口，不影响手机/平板的抽屉布局
 - 【设置】最下面有当前账号和【退出登录】，退出后回到登录页
 
+**审计**
+
+- 【登录日志】按时间倒序列出每次登录：日期时间、用户名、中文名称、状态（登录成功 / 失败 / 拦截）、IP 地址、地区、尝试的密码、客户端。默认每页 5 行，可切 5 / 15 / 30 / 50 / 100，支持上一页 / 下一页
+- 尝试的密码用 `data/secret.key` 做 AES-256-GCM 加密后存进数据库，页面只有管理员能看；直接拷走 `.sqlite` 看不到明文。**换掉或丢失 `secret.key` 后，旧记录的密码无法再解出**（AI Key 同理）
+- 每行可以直接【封禁IP】；【IP 黑名单】也能手工填 IP + 备注名。名单里的 IP 用正确密码也登不进去，尝试会记成「拦截」，解封后立即恢复。支持 IPv4 / IPv6
+- 地区由 ip-api.com 异步查询：2 秒超时，失败就留空；内网地址直接标「内网」，不会发到外部。`TEXTBOOK_GEO=off` 可整体关闭外查
+- 日志默认保留最近 10000 条（`TEXTBOOK_LOGIN_LOG_MAX` 可调），超出后自动删除最旧的记录
+- 时间在服务端按 UTC 存储，页面按浏览器所在时区显示，所以容器没设 `TZ`（常见是 UTC）时也不会整体差 8 小时
+
+![登录日志](img/登录日志.png)
+
 **HTTPS**
 
 - 【设置 → HTTPS 证书】自助签发自签名证书：填通用名称（CN）和要覆盖的域名/IP，一键生成，不需要 openssl 命令行；也能上传别处生成的 cert + key，服务端校验两者配对后才替换，旧证书自动备份到 `data/ssl/backup-<时间戳>/`
@@ -64,13 +75,13 @@
 
 ### Windows
 
-1. 解压 `textbook-1.3.0-windows.zip`
+1. 解压 `textbook-1.4.2-windows.zip`
 2. 双击 `start-windows.cmd`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
 ### macOS
 
-1. 解压 `textbook-1.3.0-macos.zip`
+1. 解压 `textbook-1.4.2-macos.zip`
 2. 双击 `start-macos.command`。首次运行如被 Gatekeeper 拦下，右键 → 打开；或在终端执行 `chmod +x start-macos.command`
 3. 浏览器打开 <http://127.0.0.1:9621/>
 
@@ -138,11 +149,13 @@ book/
 | `PORT` | `9621` | HTTP 端口 |
 | `TEXTBOOK_DATA_DIR` | `<程序目录>/data` | 数据库、会话、AI 密钥 |
 | `TEXTBOOK_ROOT` | `<程序目录>/book`（存在时） | 默认教材根目录；也可以在【设置】里改 |
-| `TEXTBOOK_SECRET` | 随机生成并写入 `data/secret.key` | 加密 AI Key 的主密钥，任意字符串（内部按 SHA-256 派生 32 字节） |
+| `TEXTBOOK_SECRET` | 随机生成并写入 `data/secret.key` | 加密 AI Key 和登录日志密码的主密钥，任意字符串（内部按 SHA-256 派生 32 字节） |
 | `TEXTBOOK_ADMIN_PASS` | `admin123` | 仅首次建库时生效的管理员密码 |
 | `TEXTBOOK_WEB_DIST` | `<程序目录>/web/dist` | 前端构建产物位置（二次开发时用） |
 | `TEXTBOOK_UPGRADE_MAX_MB` | `64` | 升级包上传上限（MB） |
 | `TEXTBOOK_UPGRADE_KEEP_BACKUPS` | `5` | 保留的升级备份份数 |
+| `TEXTBOOK_GEO` | 空 | 设为 `off` 时不查询 IP 地区；地区列留空，内网地址仍标「内网」 |
+| `TEXTBOOK_LOGIN_LOG_MAX` | `10000` | 登录日志保留条数，超出后自动删除最旧记录（最小 1000） |
 | `TEXTBOOK_NO_RESTART` | 空 | 设为 `1` 时升级/证书面板只写文件、不重启（自检/调试用；此时设置页会明确提示「需手动重启」） |
 
 【设置】页里还能配置：学生姓名、当前年级、默认学年、基本情况（这三项会作为 AI 分析的背景）、默认展开的学段目录。
@@ -154,7 +167,8 @@ book/
 - 角色只有两种：`admin` 和 `user`。管理员能管理用户、看不到别人的密码（只存 scrypt 哈希，可重置）。
 - 每个用户的笔记、书签、分析报告、AI 用量互相隔离（`user_id` 维度）。
 - 登录态是 30 天会话：`HttpOnly` Cookie，同时支持 `Authorization: Bearer` 和图片/PDF 用的 `?token=`。
-- 同一 IP 连续 8 次登录失败锁定 5 分钟。
+- 同一 IP 连续 8 次登录失败锁定 5 分钟（锁定期间的尝试记为「拦截」）。
+- 【登录日志】和【IP 黑名单】只有管理员能看到；普通用户既没有页签，直接请求 `/api/admin/login-logs` 也会被 403 拒绝。
 
 ![用户管理](img/用户管理.png)
 
@@ -264,8 +278,8 @@ web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载
 
 | 位置 | 内容 |
 |---|---|
-| `data/textbook.sqlite` | 用户、设置、笔记、书签、分享、AI 报告与用量、崩溃日志（`tb_crash_logs`，每人最多 100 条） |
-| `data/secret.key` | 加密 AI Key 的主密钥（首次启动生成；丢了需要重新填 Key） |
+| `data/textbook.sqlite` | 用户、设置、笔记、书签、分享、AI 报告与用量、崩溃日志（`tb_crash_logs`，每人最多 100 条）、登录日志（`tb_login_logs`，默认保留 10000 条）与 IP 黑名单（`tb_ip_blacklist`） |
+| `data/secret.key` | 加密 AI Key 和登录日志密码的主密钥（首次启动生成；丢了 AI Key 要重填，旧日志里的密码也无法解出） |
 | `data/upgrades/backup_<14位时间戳>/` | 每次升级覆盖前的文件备份（默认保留 5 份，含 `RESTORE.txt`） |
 | `data/upgrades/history.jsonl` | 升级历史（每次预检/应用的版本、文件数、结果） |
 | `data/upgrades/state.json` | 重启交接状态（`restart_pending`，正常启动后自动清除） |
@@ -291,6 +305,21 @@ web/src/crashlog.js 浏览器端异常记录（心跳 / 面包屑 / 下次加载
 
 **批注保存失败 / Docker 里画不上**
 教材目录必须可写，旁注文件写在 PDF 旁边。只读挂载（`:ro`）时只能看不能画。
+
+**登录日志里的「尝试的密码」为什么直接能看到明文**
+这个页签只对管理员开放，数据库里存的是用 `data/secret.key` 加密的密文，服务端解密后才显示。直接拷走 `.sqlite` 看不到明文；但把 `secret.key` 一起拷走的人可以解开，备份 `data/` 时要像对待密码一样保管。换掉 `TEXTBOOK_SECRET` 或删除 `secret.key` 后，旧记录会显示为空，AI Key 也要重新填。
+
+**地区一直是空的 / 只显示「内网」**
+内网地址（10.x、172.16–31.x、192.168.x、127.x、::1 等）不外查，直接标「内网」。公网地址要求服务器能访问 `ip-api.com`；查不到、超时或设置了 `TEXTBOOK_GEO=off` 就留空。注意这个查询会把访客 IP 发给第三方。
+
+**把自己封了，进不去后台**
+封禁只影响新的登录，已经登录的浏览器在会话过期前还能用。彻底锁死时，停服务后用 SQLite 工具删掉那一行：
+
+```bash
+sqlite3 data/textbook.sqlite "DELETE FROM tb_ip_blacklist WHERE ip='203.0.113.7';"
+```
+
+Docker 部署对 `./data/textbook.sqlite` 执行同样的语句即可，不需要改代码或重建镜像。
 
 **端口被占用**
 `PORT=9700 npm start`，或在启动脚本里设置环境变量。

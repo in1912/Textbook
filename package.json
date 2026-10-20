@@ -1,6 +1,6 @@
 {
   "name": "textbook",
-  "version": "1.3.0",
+  "version": "1.4.2",
   "private": true,
   "description": "Self-hosted full-subject textbook reader with PDF annotation, rich notes and AI study analysis",
   "license": "MIT",
@@ -18,7 +18,8 @@
     "check:upgrade": "node scripts/check-upgrade.mjs",
     "check:upgrade:ui": "node scripts/check-upgrade-ui.mjs",
     "check:features": "node scripts/check-features.mjs",
-    "check:ssl": "node scripts/check-ssl.mjs"
+    "check:ssl": "node scripts/check-ssl.mjs",
+    "check:loginlog": "node scripts/check-loginlog.mjs"
   },
   "dependencies": {
     "express": "^4.21.2"

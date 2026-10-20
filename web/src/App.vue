@@ -5,6 +5,7 @@ import StudyView from './views/StudyView.vue';
 import AiView from './views/AiView.vue';
 import UsersView from './views/UsersView.vue';
 import SettingsView from './views/SettingsView.vue';
+import LoginLogsView from './views/LoginLogsView.vue';
 import ShareView from './views/ShareView.vue';
 import LoginView from './views/LoginView.vue';
 import { api } from './api.js';
@@ -25,6 +26,7 @@ const state = reactive({
   // the textbook currently open in 教材学习; AI analysis and sharing read it
   book: { path: '', title: '', page: 1 },
   reloadKey: 0,
+  caps: { admin: false },
 });
 provide('appState', state);
 
@@ -34,8 +36,10 @@ const tabDefs = [
   { key: 'ai', label: 'AI分析', icon: 'sparkles', comp: AiView },
   { key: 'users', label: '用户管理', icon: 'users', comp: UsersView },
   { key: 'settings', label: '设置', icon: 'settings', comp: SettingsView },
+  { key: 'login-logs', label: '登录日志', icon: 'lock', comp: LoginLogsView, adminOnly: true },
 ];
-const viewComp = computed(() => (tabDefs.find((t) => t.key === tab.value) || tabDefs[0]).comp);
+const tabsShown = computed(() => tabDefs.filter((t) => !t.adminOnly || state.caps.admin));
+const viewComp = computed(() => (tabsShown.value.find((t) => t.key === tab.value) || tabDefs[0]).comp);
 
 const loading = ref(true);
 const bootError = ref('');
@@ -59,6 +63,12 @@ async function loadSettings() {
     needLogin.value = false;
     bootError.value = '';
     applyTheme(r.settings.theme);
+    // 登录日志 is administrator-only; ask the server instead of guessing.
+    try {
+      const caps = await api.get('/capabilities');
+      state.caps.admin = !!caps.admin;
+    } catch { state.caps.admin = false; }
+    if (!tabsShown.value.some((t) => t.key === tab.value)) tab.value = 'study';
   } catch (e) {
     if (e.status === 401) {
       // Embedded copies live under /textbook/ and rely on the workbench login;
@@ -110,7 +120,7 @@ onMounted(loadSettings);
           <small>Textbook</small>
         </div>
         <nav class="tabs">
-          <button v-for="t in tabDefs" :key="t.key" class="tab" :class="{ active: tab === t.key }"
+          <button v-for="t in tabsShown" :key="t.key" class="tab" :class="{ active: tab === t.key }"
                   @click="tab = t.key">
             <span class="dotmark" />
             <Icon :name="t.icon" :size="15" />
